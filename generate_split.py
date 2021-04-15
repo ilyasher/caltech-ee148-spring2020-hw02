@@ -1,5 +1,6 @@
 import numpy as np
 import os
+import json
 
 np.random.seed(2020) # to ensure you always get the same train/test split
 
@@ -8,7 +9,7 @@ gts_path = '../data/hw02_annotations'
 split_path = '../data/hw02_splits'
 os.makedirs(split_path, exist_ok=True) # create directory if needed
 
-split_test = False # set to True and run when annotations are available
+split_test = True # set to True and run when annotations are available
 
 train_frac = 0.85
 

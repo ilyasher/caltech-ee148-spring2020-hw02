@@ -6,6 +6,7 @@ from PIL import Image
 templates_dir = './templates/red-light'
 template_files = sorted(os.listdir(templates_dir))
 templates = [np.load(os.path.join(templates_dir, f)) for f in template_files if 'template' in f]
+print(f"Using {len(templates)} template{"" if len(templates) == 1 else "s"}: {template_files}")
 
 def compute_convolution(I, T, stride=1):
     '''
@@ -19,6 +20,8 @@ def compute_convolution(I, T, stride=1):
     '''
     BEGIN YOUR CODE
     '''
+
+    # To make things simple, let's fix the kernel dimensions to be odd.
     (k_height, k_width, k_channels) = T.shape
     k_area = k_height * k_width
     if n_channels != k_channels:
@@ -27,10 +30,12 @@ def compute_convolution(I, T, stride=1):
     if k_height % 2 == 0 or k_width % 2 == 0:
         raise ValueError('Dimensions of kernels should be odd')
 
+    # Pad the image with a border to make it easier to compute the dot products.
     padded_I = np.zeros((n_rows+k_height-1, n_cols+k_width-1, n_channels))
     pad_h, pad_w = int((k_height - 1)/2), int((k_width - 1)/2)
     padded_I[pad_h:-pad_h, pad_w:-pad_w, :] = I
 
+    # Create the heatmap which we will return.
     h_height = int(n_rows / stride)
     h_width = int(n_cols / stride)
     heatmap = np.zeros((h_height, h_width))
@@ -39,9 +44,15 @@ def compute_convolution(I, T, stride=1):
         for hcol in range(h_width):
             row = hrow * stride
             col = hcol * stride
+
+            # The pixel value in the heatmap is the dot product of the
+            # image section and the kernel.
             heatmap[hrow, hcol] = np.sum(padded_I[row:row+k_height, col:col+k_width, :] * T)
 
-    heatmap = heatmap / k_area # Should also normalize at some point
+    # We don't want the dot products to change too
+    # much with the kernel size.
+    heatmap = heatmap / (k_area ** 2)
+
     '''
     END YOUR CODE
     '''
@@ -63,7 +74,8 @@ def predict_boxes(heatmap, stride):
 
     n_rows, n_cols = np.shape(heatmap)[:2]
 
-    threshold = 100
+    threshold = 2
+
     hits = heatmap > threshold
 
     # Simple recursive "island-finding" algorithm
@@ -102,9 +114,10 @@ def predict_boxes(heatmap, stride):
     for i in range(n_rows):
         for j in range(n_cols):
             bbox = [n_rows, n_cols, 0, 0, 0]
-            if recursive_grouper(i, j, bbox, hits):
+            #if recursive_grouper(i, j, bbox, hits):
                 # Scale confidence to [0, 1]
-                confidence = 1 / (1 + 2.0**(-bbox[4])) # Sigmoid
+            if hits[i, j]:
+                confidence = 1 / (1 + 2.0**(-heatmap[i, j])) # Sigmoid
                 bbox[0] = (bbox[0] - 1) * stride
                 bbox[1] = (bbox[1] - 1) * stride
                 bbox[2] = (bbox[2] + 1) * stride
@@ -140,20 +153,21 @@ def detect_red_light_mf(I):
     '''
     BEGIN YOUR CODE
     '''
-    # template_height = 8
-    # template_width = 6
 
-    # You may use multiple stages and combine the results
-    # T = np.random.random((template_height, template_width))
+    # Normalize image
+    mean = np.mean(I, axis=(0, 1))
+    std  = np.std(I, axis=(0, 1))
+    I = (I - mean) / std
 
     output = list()
-    for T in templates:
+    for T in templates[0]:
         # Ensure that T is odd-dimensional
         if T.shape[0] % 2 == 0:
             T = T[:-1, :, :]
         if T.shape[1] % 2 == 0:
             T = T[:, :-1, :]
         stride = int((min(T.shape[0], T.shape[1]) - 1) / 2)
+
         heatmap = compute_convolution(I, T, stride)
         output += predict_boxes(heatmap, stride)
 
@@ -178,7 +192,7 @@ file_names_test = np.load(os.path.join(split_path,'file_names_test.npy'))
 
 # set a path for saving predictions:
 preds_path = '../data/hw02_preds'
-os.makedirs(preds_path, exist_ok=True) # create directory if needed
+os.makedirs(preds_path, exist_ok    /**=True) # create directory if needed
 
 # Set this parameter to True when you're done with algorithm development:
 done_tweaking = False
@@ -211,7 +225,7 @@ for i, filename in enumerate(file_names_train):
         print(filename, box)
         y0, x0, y1, x1, _ = tuple(box)
         cutout = I[y0:y1+1, x0:x1+1, :]
-        cutout = np.maximum(cutout, make_outline(y1-y0+1, x1-x0+1))
+        cutout = np.maximum(cutout, make_outline(cutout.shape[0], cutout.shape[1]))
         I[y0:y1+1, x0:x1+1, :] = cutout
     Image.fromarray(I).save(os.path.join(preds_path, filename))
 

@@ -9,10 +9,14 @@ def compute_iou(box_1, box_2):
     '''
 
     def area(box):
-        return (box[2]-box[0]+1) * (box[3]-box[1]+1)
+        dy = box[2]-box[0]+1
+        dx = box[3]-box[1]+1
+        if dy <= 0 or dx <= 0:
+            return 0
+        return dx * dy
 
-    tl_row1, tl_col1, br_row1, br_col1, _ = tuple(box1)
-    tl_row2, tl_col2, br_row2, br_col2, _ = tuple(box2)
+    tl_row1, tl_col1, br_row1, br_col1 = tuple(box_1)
+    tl_row2, tl_col2, br_row2, br_col2 = tuple(box_2)
 
     inter = 4 * [0]
     inter[0] = max(box_1[0], box_2[0])
@@ -25,6 +29,8 @@ def compute_iou(box_1, box_2):
     ai = area(inter)
 
     iou = ai / (a1 + a2 - ai)
+
+    # print(a1, a2, ai, iou)
 
     assert (iou >= 0) and (iou <= 1.0)
 
@@ -58,7 +64,7 @@ def compute_counts(preds, gts, iou_thr=0.5, conf_thr=0.5):
 
         return False
 
-    for pred_file, pred in preds.iteritems():
+    for pred_file, pred in preds.items():
         gt = gts[pred_file]
 
         found = 0
@@ -87,7 +93,7 @@ gts_path = '../data/hw02_annotations'
 # load splits:
 split_path = '../data/hw02_splits'
 file_names_train = np.load(os.path.join(split_path,'file_names_train.npy'))
-file_names_test = np.load(os.path.join(split_Path,'file_names_test.npy'))
+file_names_test = np.load(os.path.join(split_path,'file_names_test.npy'))
 
 # Set this parameter to True when you're done with algorithm development:
 done_tweaking = False
@@ -118,7 +124,12 @@ if done_tweaking:
 # The code below gives an example on the training set for one IoU threshold.
 
 
-confidence_thrs = np.sort(np.array([preds_train[fname][4] for fname in preds_train],dtype=float)) # using (ascending) list of confidence scores as thresholds
+all_boxes = list(preds_train.values())
+confidence_thrs = list()
+for preds in preds_train.values():
+    for box in preds:
+        confidence_thrs.append(box[4])
+
 tp_train = np.zeros(len(confidence_thrs))
 fp_train = np.zeros(len(confidence_thrs))
 fn_train = np.zeros(len(confidence_thrs))
@@ -130,9 +141,13 @@ for i, conf_thr in enumerate(confidence_thrs):
 precision = tp_train / (tp_train + fp_train)
 recall = tp_train / (tp_train + fn_train)
 
+print(tp_train, fp_train, fn_train)
+print(precision, recall)
+
 import matplotlib.pyplot as plt
 
 plt.scatter(precision, recall)
+plt.show()
 
 if done_tweaking:
     print('Code for plotting test set PR curves.')
