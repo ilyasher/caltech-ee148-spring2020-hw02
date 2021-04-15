@@ -3,19 +3,38 @@ import numpy as np
 import json
 from PIL import Image
 
+templates_dir = './templates/red-light'
+template_files = sorted(os.listdir(templates_dir))
+templates = [np.load(os.path.join(templates_dir, f)) for f in template_files if 'template' in f]
+
 def compute_convolution(I, T, stride=None):
     '''
-    This function takes an image <I> and a template <T> (both numpy arrays) 
-    and returns a heatmap where each grid represents the output produced by 
-    convolution at each location. You can add optional parameters (e.g. stride, 
-    window_size, padding) to create additional functionality. 
+    This function takes an image <I> and a template <T> (both numpy arrays)
+    and returns a heatmap where each grid represents the output produced by
+    convolution at each location. You can add optional parameters (e.g. stride,
+    window_size, padding) to create additional functionality.
     '''
     (n_rows,n_cols,n_channels) = np.shape(I)
 
     '''
     BEGIN YOUR CODE
     '''
-    heatmap = np.random.random((n_rows, n_cols))
+    (k_height, k_width, k_channels) = T.shape
+    k_area = k_height * k_width
+    if n_channels != k_channels:
+        raise ValueError('number of channels does not match')
+
+    if k_height % 2 == 0 or k_width % 2 == 0:
+        raise ValueError('Dimensions of kernels should be odd')
+
+    padded_I = np.zeros((n_rows+k_height-1, n_cols+k_width-1))
+    pad_h, pad_w = int((k_height - 1)/2), int((k_width - 1)/2)
+    padded_I[pad_h:-pad_h, pad_w:-pad_w] = I
+
+    heatmap = np.zeros((n_rows, n_cols))
+
+    for row, cols in zip(range(n_rows), range(n_cols)):
+        heatmap[row, col] = np.sum(padded_I[row:row+k_height, col:col+k_width, :] * T) / k_area
 
     '''
     END YOUR CODE
@@ -35,28 +54,51 @@ def predict_boxes(heatmap):
     '''
     BEGIN YOUR CODE
     '''
-    
-    '''
-    As an example, here's code that generates between 1 and 5 random boxes
-    of fixed size and returns the results in the proper format.
-    '''
 
-    box_height = 8
-    box_width = 6
+    (n_rows,n_cols,n_channels) = np.shape(I)
 
-    num_boxes = np.random.randint(1,5)
+    threshold = 2
+    hits = heatmap > threshold
 
-    for i in range(num_boxes):
-        (n_rows,n_cols,n_channels) = np.shape(I)
+    # Simple recursive "island-finding" algorithm
+    def recursive_grouper(i, j, bbox):
+        # Out of bounds
+        if i < 0 or i >= n_rows or j < 0 or j >= n_cols:
+            return False
 
-        tl_row = np.random.randint(n_rows - box_height)
-        tl_col = np.random.randint(n_cols - box_width)
-        br_row = tl_row + box_height
-        br_col = tl_col + box_width
+        # Not a detection, or already visited
+        if not hits[i, j]:
+            return False
 
-        score = np.random.random()
+        # Improve bounding box
+        bbox[0] = min(bbox[0], i)
+        bbox[1] = min(bbox[1], j)
+        bbox[2] = max(bbox[2], i)
+        bbox[3] = max(bbox[3], j)
 
-        output.append([tl_row,tl_col,br_row,br_col, score])
+        # Improve confidence score
+        bbox[4] += heatmap[i, j]
+
+        # Mark this pixel as visited.
+        hits[i, j] = False
+
+        # Search the rest of the island.
+        recursive_grouper(i-1, j)
+        recursive_grouper(i+1, j)
+        recursive_grouper(i, j-1)
+        recursive_grouper(i, j+1)
+
+        # We found a new detection
+        return True
+
+    for i, j in zip(range(n_rows), range(n_cols)):
+        bbox = [n_row, n_cols, 0, 0, 0]
+        if recursive_grouper(i, j, bbox):
+            # Scale confidence to [0, 1]
+            bbox[4] = 1 / (1 + 2**(-bbox[4])) # Sigmoid
+            output.append(bbox)
+
+    # Alternatively, no island-finding
 
     '''
     END YOUR CODE
@@ -68,12 +110,12 @@ def predict_boxes(heatmap):
 def detect_red_light_mf(I):
     '''
     This function takes a numpy array <I> and returns a list <output>.
-    The length of <output> is the number of bounding boxes predicted for <I>. 
-    Each entry of <output> is a list <[row_TL,col_TL,row_BR,col_BR,score]>. 
-    The first four entries are four integers specifying a bounding box 
-    (the row and column index of the top left corner and the row and column 
+    The length of <output> is the number of bounding boxes predicted for <I>.
+    Each entry of <output> is a list <[row_TL,col_TL,row_BR,col_BR,score]>.
+    The first four entries are four integers specifying a bounding box
+    (the row and column index of the top left corner and the row and column
     index of the bottom right corner).
-    <score> is a confidence score ranging from 0 to 1. 
+    <score> is a confidence score ranging from 0 to 1.
 
     Note that PIL loads images in RGB order, so:
     I[:,:,0] is the red channel
@@ -90,8 +132,10 @@ def detect_red_light_mf(I):
     # You may use multiple stages and combine the results
     T = np.random.random((template_height, template_width))
 
-    heatmap = compute_convolution(I, T)
-    output = predict_boxes(heatmap)
+    output = list()
+    for T in templates:
+        heatmap = compute_convolution(I, T)
+        output += predict_boxes(heatmap)
 
     '''
     END YOUR CODE
@@ -107,7 +151,7 @@ def detect_red_light_mf(I):
 # set the path to the downloaded data:
 data_path = '../data/RedLights2011_Medium'
 
-# load splits: 
+# load splits:
 split_path = '../data/hw02_splits'
 file_names_train = np.load(os.path.join(split_path,'file_names_train.npy'))
 file_names_test = np.load(os.path.join(split_Path,'file_names_test.npy'))
@@ -139,7 +183,7 @@ with open(os.path.join(preds_path,'preds_train.json'),'w') as f:
 
 if done_tweaking:
     '''
-    Make predictions on the test set. 
+    Make predictions on the test set.
     '''
     preds_test = {}
     for i in range(len(file_names_test)):
