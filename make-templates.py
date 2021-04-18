@@ -20,8 +20,8 @@ for i, filename in enumerate(template_img_files):
     mean = np.mean(I, axis=(0, 1))
     std  = np.std(I, axis=(0, 1))
 
-    # template = (template - mean) / std
-    template = (template - np.mean(I)) / np.std(I)
+    template = (template - mean) / std
+    # template = (template - np.mean(I)) / np.std(I)
     # template = (template - DATA_MEAN) / DATA
 
     print(filename, mean, std, np.mean(template), np.std(template))

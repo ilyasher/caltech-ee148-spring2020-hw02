@@ -126,7 +126,6 @@ if done_tweaking:
 # For a fixed IoU threshold, vary the confidence thresholds.
 # The code below gives an example on the training set for one IoU threshold.
 
-
 all_boxes = list(preds_train.values())
 confidence_thrs = list()
 for preds in preds_train.values():
@@ -134,28 +133,44 @@ for preds in preds_train.values():
         confidence_thrs.append(box[4])
 
 import random
-confidence_thrs = random.choices(confidence_thrs, k=40)
-tp_train = np.zeros(len(confidence_thrs))
-fp_train = np.zeros(len(confidence_thrs))
-fn_train = np.zeros(len(confidence_thrs))
-for i, conf_thr in enumerate(confidence_thrs):
-    print(i)
-    tp_train[i], fp_train[i], fn_train[i] = compute_counts(preds_train, gts_train, iou_thr=0.5, conf_thr=conf_thr)
-
-# Plot training set PR curves
-
-precision = tp_train / (tp_train + fp_train)
-recall = tp_train / (tp_train + fn_train)
-
-print(tp_train, fp_train, fn_train)
-print(precision, recall)
-
 import matplotlib.pyplot as plt
+random.seed(23)
+confidence_thrs = random.choices(confidence_thrs, k=256)
 
-plt.scatter(recall, precision)
-plt.show()
+fig, ax = plt.subplots()
 
-plt.scatter(tp_train, fp_train)
+ious = [0.25, 0.5, 0.75]
+precision = np.zeros((len(ious), len(confidence_thrs)))
+recall    = np.zeros((len(ious), len(confidence_thrs)))
+color     = np.zeros((len(ious), len(confidence_thrs)))
+
+for i, iou_thr in enumerate(ious):
+    tp_train = np.zeros(len(confidence_thrs))
+    fp_train = np.zeros(len(confidence_thrs))
+    fn_train = np.zeros(len(confidence_thrs))
+    for j, conf_thr in enumerate(confidence_thrs):
+        tp_train[j], fp_train[j], fn_train[j] = compute_counts(preds_train, gts_train, iou_thr=iou_thr, conf_thr=conf_thr)
+
+    precision[i] = tp_train / (tp_train + fp_train)
+    recall[i] = tp_train / (tp_train + fn_train)
+    color[i] = iou_thr
+    print(f"Progress: {i+1}/{len(ious)}")
+
+scatter = ax.scatter(recall.reshape(len(ious)*len(confidence_thrs)),
+                     precision.reshape(len(ious)*len(confidence_thrs)),
+                     c=color.reshape(len(ious)*len(confidence_thrs)),
+                     cmap='viridis',
+                     vmin=0,
+                     label=f"IOU > {iou_thr}",
+                     vmax=1)
+
+legend1 = ax.legend(*scatter.legend_elements(),
+                    title="IoU Threshold")
+ax.add_artist(legend1)
+
+plt.title(f"P-R Curve for Traffic Light Detector")
+plt.ylabel('Precision')
+plt.xlabel('Recall')
 plt.show()
 
 if done_tweaking:

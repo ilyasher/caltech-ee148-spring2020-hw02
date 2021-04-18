@@ -8,20 +8,27 @@ import sys
 DATA_MEAN = 90
 DATA_STD  = 65
 
+def resize(arr, w, h):
+    shape = list(arr.shape)
+    shape[:2] = [h, w]
+    ret = np.zeros(shape)
+    old_h, old_w = arr.shape[:2]
+    for x in range(w):
+        for y in range(h):
+            old_x = int(x / w * old_w)
+            old_y = int(y / h * old_h)
+            ret[y][x] = arr[old_y][old_x]
+    return ret
+
 templates_dir = './templates/red-light'
-# template_files = sorted([f for f in os.listdir(templates_dir) if '.jpg' in f])
-# template_files = [template_files[int(i)] for i in sys.argv[1:]]
-# templates = list()
-# for f in template_files:
-#     T = np.asarray(Image.open(os.path.join(templates_dir, f))).astype(np.float32)
-#     T = (T - np.mean(T)) / np.std(T)
-#     # T = (T - DATA_MEAN) / DATA_STD
-#     templates.append(T)
 template_files = sorted([f for f in os.listdir(templates_dir) if 'template' in f])
-template_files = [template_files[int(i)] for i in sys.argv[1:]]
+# template_files = [template_files[int(i)] for i in sys.argv[1:]]
 templates = list()
 for f in template_files:
-    templates.append(np.load(os.path.join(templates_dir, f)))
+    template = np.load(os.path.join(templates_dir, f))
+    templates.append(template)
+    # templates.append(resize(template, int(template.shape[1] * 1.5), int(template.shape[0] * 1.5)))
+    # templates.append(resize(template, int(template.shape[1] * 0.7), int(template.shape[0] * 0.7)))
 print(f"Using {len(templates)} template{'' if len(templates) == 1 else 's'}: {template_files}")
 
 def compute_convolution(I, T, stride=1):
@@ -52,24 +59,19 @@ def compute_convolution(I, T, stride=1):
     padded_I[pad_h:-pad_h, pad_w:-pad_w, :] = I
 
     # Create the heatmap which we will return.
-    h_height = int(n_rows / stride)
-    h_width = int(n_cols / stride)
-    heatmap = np.zeros((h_height, h_width))
+    heatmap = np.zeros((n_rows, n_cols))
 
-    for hrow in range(h_height):
-        for hcol in range(h_width):
-            row = hrow * stride
-            col = hcol * stride
+    for row in range(0, n_rows, stride):
+        for col in range(0, n_cols, stride):
 
             # The pixel value in the heatmap is the dot product of the
             # image section and the kernel.
-            heatmap[hrow, hcol] = np.sum(padded_I[row:row+k_height, col:col+k_width, :] * T)
+            val = np.sum(padded_I[row:row+k_height, col:col+k_width, :] * T)
+            heatmap[row-pad_h:row+pad_h, col-pad_w:col+pad_w] = np.maximum(heatmap[row-pad_h:row+pad_h, col-pad_w:col+pad_w], val)
 
     # We don't want the dot products to change too
     # much with the kernel size.
     heatmap = heatmap / (k_area ** 1)
-    # heatmap = heatmap / (np.sum(T) * np.mean(I) * k_area)
-    # heatmap = heatmap / (np.sum(T))
 
     '''
     END YOUR CODE
@@ -96,58 +98,55 @@ def predict_boxes(heatmap):
 
     hits = heatmap > threshold
 
-    print('max: ', np.max(heatmap), 'avg: ', np.mean(heatmap))
+    def grouper(i, j, bbox, hits):
+        q = [(i, j)]
+        seen = set()
 
-    # Simple recursive "island-finding" algorithm
-    def recursive_grouper(i, j, bbox, hits):
-        # Out of bounds
-        if i < 0 or i >= n_rows or j < 0 or j >= n_cols:
-            return False
-
-        # Not a detection, or already visited
         if not hits[i, j]:
             return False
 
-        print("hit!")
+        while q:
+            i, j = q.pop(0)
+            if (i, j) in seen:
+                continue
+            seen.add((i, j))
 
-        # Improve bounding box
-        bbox[0] = min(bbox[0], i)
-        bbox[1] = min(bbox[1], j)
-        bbox[2] = max(bbox[2], i)
-        bbox[3] = max(bbox[3], j)
+            if i < 0 or i >= n_rows or j < 0 or j >= n_cols:
+                continue
 
-        # Improve confidence score
-        bbox[4] += heatmap[i, j]
+            # Not a detection
+            if not hits[i, j]:
+                continue
 
-        # Mark this pixel as visited.
-        hits[i, j] = False
+            hits[i, j] = False
 
-        # Search the rest of the island.
-        recursive_grouper(i-1, j, bbox, hits)
-        recursive_grouper(i+1, j, bbox, hits)
-        recursive_grouper(i, j-1, bbox, hits)
-        recursive_grouper(i, j+1, bbox, hits)
+            # Improve bounding box
+            bbox[0] = min(bbox[0], i)
+            bbox[1] = min(bbox[1], j)
+            bbox[2] = max(bbox[2], i)
+            bbox[3] = max(bbox[3], j)
 
-        # We found a new detection
+            # Improve confidence score
+            # bbox[4] += heatmap[i, j]
+            bbox[4] = max(bbox[4], heatmap[i, j])
+
+            # Search the rest of the island.
+            for new in [(i+1, j), (i-1, j), (i, j+1), (i, j-1)]:
+                if new not in q and new not in seen:
+                    q.append(new)
+
         return True
 
     for i in range(n_rows):
         for j in range(n_cols):
-            if recursive_grouper(i, j, bbox, hits):
+            big = max(n_rows, n_cols)
+            bbox = [big, big, 0, 0, 0]
+            if grouper(i, j, bbox, hits):
                 # Scale confidence to [0, 1]
-            # if hits[i, j]:
-                # print("hit!")
-                # confidence = 1 / (1 + 2.0**(-heatmap[i, j])) # Sigmoid
-                confidence = 1 / (1 + 2.0**(-bbot[4])) # Sigmoid
-                # bbox = [0] * 5
-                # bbox[0] = (i - 1) * stride
-                # bbox[1] = (j - 1) * stride
-                # bbox[2] = (i + 1) * stride
-                # bbox[3] = (j + 1) * stride
+                confidence = 1 / (1 + 2.0**(-bbox[4])) # Sigmoid
+                print("Detection size ({}, {})\t Confidence: {}".format(bbox[3] - bbox[1], bbox[2] - bbox[0], confidence))
                 bbox[4] = confidence
                 output.append(bbox)
-
-    # Alternatively, no island-finding
 
     '''
     END YOUR CODE
@@ -155,8 +154,9 @@ def predict_boxes(heatmap):
 
     return output
 
+heatmaps_path = '../data/hw02_heatmaps'
 
-def detect_red_light_mf(I):
+def detect_red_light_mf(I, filename=None):
     '''
     This function takes a numpy array <I> and returns a list <output>.
     The length of <output> is the number of bounding boxes predicted for <I>.
@@ -179,11 +179,9 @@ def detect_red_light_mf(I):
     I = I.astype(np.float32)
 
     # Normalize image
-    # I = (I - DATA_MEAN) / DATA_STD
-    # I = (I - np.mean(I, axis=(0, 1))) / np.std(I, axis=(0, 1))
-    I = (I - np.mean(I)) / np.std(I)
+    I = (I - np.mean(I, axis=(0, 1))) / np.std(I, axis=(0, 1))
 
-    heatmap = np.zeros(I.shape)
+    heatmap = np.zeros(I.shape[:2])
 
     for T in templates:
         # Ensure that T is odd-dimensional
@@ -191,9 +189,13 @@ def detect_red_light_mf(I):
             T = T[:-1, :, :]
         if T.shape[1] % 2 == 0:
             T = T[:, :-1, :]
-        stride = int((min(T.shape[0], T.shape[1]) - 1) / 2)
+        stride = max(int((min(T.shape[0], T.shape[1]) - 1) / 5), 2)
 
-        heatmap = np.maximum(heatmap, compute_convolution(I, T, stride))
+        conv = compute_convolution(I, T, stride)
+        heatmap = np.maximum(heatmap, conv)
+
+    if filename:
+        Image.fromarray(np.minimum(255, heatmap * 50).astype(np.uint8)).save(os.path.join(heatmaps_path, filename))
 
     output = predict_boxes(heatmap)
 
@@ -233,7 +235,7 @@ def make_outline(h, w):
 Make predictions on the training set.
 '''
 preds_train = {}
-for i, filename in enumerate(file_names_train):
+for i, filename in enumerate(sorted(file_names_train)):
 
     # read image using PIL:
     I = Image.open(os.path.join(data_path,filename))
@@ -241,14 +243,13 @@ for i, filename in enumerate(file_names_train):
     # convert to numpy array:
     I = np.asarray(I)
 
-    print(i)
-    preds = detect_red_light_mf(I)
+    print(f"Processing Image {i+1}/{len(file_names_train)}, name: {filename}")
+    preds = detect_red_light_mf(I, filename=filename)
     preds_train[filename] = preds
 
     # Visualizes predictions
     I = I.copy()
     for box in preds:
-        # print(filename, box)
         y0, x0, y1, x1, _ = tuple(box)
         cutout = I[y0:y1+1, x0:x1+1, :]
         cutout = np.maximum(cutout, make_outline(cutout.shape[0], cutout.shape[1]))
