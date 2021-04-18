@@ -3,10 +3,26 @@ import numpy as np
 import json
 from PIL import Image
 
+import sys
+
+DATA_MEAN = 90
+DATA_STD  = 65
+
 templates_dir = './templates/red-light'
-template_files = sorted(os.listdir(templates_dir))
-templates = [np.load(os.path.join(templates_dir, f)) for f in template_files if 'template' in f]
-print(f"Using {len(templates)} template{"" if len(templates) == 1 else "s"}: {template_files}")
+# template_files = sorted([f for f in os.listdir(templates_dir) if '.jpg' in f])
+# template_files = [template_files[int(i)] for i in sys.argv[1:]]
+# templates = list()
+# for f in template_files:
+#     T = np.asarray(Image.open(os.path.join(templates_dir, f))).astype(np.float32)
+#     T = (T - np.mean(T)) / np.std(T)
+#     # T = (T - DATA_MEAN) / DATA_STD
+#     templates.append(T)
+template_files = sorted([f for f in os.listdir(templates_dir) if 'template' in f])
+template_files = [template_files[int(i)] for i in sys.argv[1:]]
+templates = list()
+for f in template_files:
+    templates.append(np.load(os.path.join(templates_dir, f)))
+print(f"Using {len(templates)} template{'' if len(templates) == 1 else 's'}: {template_files}")
 
 def compute_convolution(I, T, stride=1):
     '''
@@ -51,7 +67,9 @@ def compute_convolution(I, T, stride=1):
 
     # We don't want the dot products to change too
     # much with the kernel size.
-    heatmap = heatmap / (k_area ** 2)
+    heatmap = heatmap / (k_area ** 1)
+    # heatmap = heatmap / (np.sum(T) * np.mean(I) * k_area)
+    # heatmap = heatmap / (np.sum(T))
 
     '''
     END YOUR CODE
@@ -60,7 +78,7 @@ def compute_convolution(I, T, stride=1):
     return heatmap
 
 
-def predict_boxes(heatmap, stride):
+def predict_boxes(heatmap):
     '''
     This function takes heatmap and returns the bounding boxes and associated
     confidence scores.
@@ -74,9 +92,11 @@ def predict_boxes(heatmap, stride):
 
     n_rows, n_cols = np.shape(heatmap)[:2]
 
-    threshold = 2
+    threshold = 2.5
 
     hits = heatmap > threshold
+
+    print('max: ', np.max(heatmap), 'avg: ', np.mean(heatmap))
 
     # Simple recursive "island-finding" algorithm
     def recursive_grouper(i, j, bbox, hits):
@@ -113,15 +133,17 @@ def predict_boxes(heatmap, stride):
 
     for i in range(n_rows):
         for j in range(n_cols):
-            bbox = [n_rows, n_cols, 0, 0, 0]
-            #if recursive_grouper(i, j, bbox, hits):
+            if recursive_grouper(i, j, bbox, hits):
                 # Scale confidence to [0, 1]
-            if hits[i, j]:
-                confidence = 1 / (1 + 2.0**(-heatmap[i, j])) # Sigmoid
-                bbox[0] = (bbox[0] - 1) * stride
-                bbox[1] = (bbox[1] - 1) * stride
-                bbox[2] = (bbox[2] + 1) * stride
-                bbox[3] = (bbox[3] + 1) * stride
+            # if hits[i, j]:
+                # print("hit!")
+                # confidence = 1 / (1 + 2.0**(-heatmap[i, j])) # Sigmoid
+                confidence = 1 / (1 + 2.0**(-bbot[4])) # Sigmoid
+                # bbox = [0] * 5
+                # bbox[0] = (i - 1) * stride
+                # bbox[1] = (j - 1) * stride
+                # bbox[2] = (i + 1) * stride
+                # bbox[3] = (j + 1) * stride
                 bbox[4] = confidence
                 output.append(bbox)
 
@@ -154,13 +176,16 @@ def detect_red_light_mf(I):
     BEGIN YOUR CODE
     '''
 
-    # Normalize image
-    mean = np.mean(I, axis=(0, 1))
-    std  = np.std(I, axis=(0, 1))
-    I = (I - mean) / std
+    I = I.astype(np.float32)
 
-    output = list()
-    for T in templates[0]:
+    # Normalize image
+    # I = (I - DATA_MEAN) / DATA_STD
+    # I = (I - np.mean(I, axis=(0, 1))) / np.std(I, axis=(0, 1))
+    I = (I - np.mean(I)) / np.std(I)
+
+    heatmap = np.zeros(I.shape)
+
+    for T in templates:
         # Ensure that T is odd-dimensional
         if T.shape[0] % 2 == 0:
             T = T[:-1, :, :]
@@ -168,8 +193,9 @@ def detect_red_light_mf(I):
             T = T[:, :-1, :]
         stride = int((min(T.shape[0], T.shape[1]) - 1) / 2)
 
-        heatmap = compute_convolution(I, T, stride)
-        output += predict_boxes(heatmap, stride)
+        heatmap = np.maximum(heatmap, compute_convolution(I, T, stride))
+
+    output = predict_boxes(heatmap)
 
     '''
     END YOUR CODE
@@ -192,7 +218,7 @@ file_names_test = np.load(os.path.join(split_path,'file_names_test.npy'))
 
 # set a path for saving predictions:
 preds_path = '../data/hw02_preds'
-os.makedirs(preds_path, exist_ok    /**=True) # create directory if needed
+os.makedirs(preds_path, exist_ok=True) # create directory if needed
 
 # Set this parameter to True when you're done with algorithm development:
 done_tweaking = False
@@ -222,7 +248,7 @@ for i, filename in enumerate(file_names_train):
     # Visualizes predictions
     I = I.copy()
     for box in preds:
-        print(filename, box)
+        # print(filename, box)
         y0, x0, y1, x1, _ = tuple(box)
         cutout = I[y0:y1+1, x0:x1+1, :]
         cutout = np.maximum(cutout, make_outline(cutout.shape[0], cutout.shape[1]))

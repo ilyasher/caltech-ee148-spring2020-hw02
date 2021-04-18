@@ -59,7 +59,7 @@ def compute_counts(preds, gts, iou_thr=0.5, conf_thr=0.5):
     def is_gt_found(gt_box, pred):
         for pred_box in pred:
             iou = compute_iou(pred_box[:4], gt_box)
-            if iou >= iou_thr and pred_box[4] >= conf_thr:
+            if iou >= iou_thr:
                 return True
 
         return False
@@ -68,6 +68,9 @@ def compute_counts(preds, gts, iou_thr=0.5, conf_thr=0.5):
         gt = gts[pred_file]
 
         found = 0
+
+        # Filter out low-confidence predictions
+        pred = [p for p in pred if p[4] >= conf_thr]
 
         # Take advantage of the fact that traffic lights
         # (ground truths) won't overlap
@@ -130,10 +133,13 @@ for preds in preds_train.values():
     for box in preds:
         confidence_thrs.append(box[4])
 
+import random
+confidence_thrs = random.choices(confidence_thrs, k=40)
 tp_train = np.zeros(len(confidence_thrs))
 fp_train = np.zeros(len(confidence_thrs))
 fn_train = np.zeros(len(confidence_thrs))
 for i, conf_thr in enumerate(confidence_thrs):
+    print(i)
     tp_train[i], fp_train[i], fn_train[i] = compute_counts(preds_train, gts_train, iou_thr=0.5, conf_thr=conf_thr)
 
 # Plot training set PR curves
@@ -146,7 +152,10 @@ print(precision, recall)
 
 import matplotlib.pyplot as plt
 
-plt.scatter(precision, recall)
+plt.scatter(recall, precision)
+plt.show()
+
+plt.scatter(tp_train, fp_train)
 plt.show()
 
 if done_tweaking:
