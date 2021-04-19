@@ -20,9 +20,14 @@ def resize(arr, w, h):
             ret[y][x] = arr[old_y][old_x]
     return ret
 
+weak=True
+
 templates_dir = './templates/red-light'
 template_files = sorted([f for f in os.listdir(templates_dir) if 'template' in f])
 # template_files = [template_files[int(i)] for i in sys.argv[1:]]
+if weak:
+    template_files = [template_files[int(i)] for i in [1, 2, 4, 5]]
+
 templates = list()
 for f in template_files:
     template = np.load(os.path.join(templates_dir, f))
@@ -223,7 +228,7 @@ preds_path = '../data/hw02_preds'
 os.makedirs(preds_path, exist_ok=True) # create directory if needed
 
 # Set this parameter to True when you're done with algorithm development:
-done_tweaking = False
+done_tweaking = True
 
 def make_outline(h, w):
     outline = np.zeros(shape=(h, w, 3))
@@ -258,6 +263,7 @@ for i, filename in enumerate(sorted(file_names_train)):
 
 
 # save preds (overwrites any previous predictions!)
+# TODO: uncomment
 with open(os.path.join(preds_path,'preds_train.json'),'w') as f:
     json.dump(preds_train,f)
 
@@ -267,15 +273,27 @@ if done_tweaking:
     Make predictions on the test set.
     '''
     preds_test = {}
-    for i in range(len(file_names_test)):
+    for i, filename in enumerate(sorted(file_names_test)):
+
+        print(f"Processing Test Image {i+1}/{len(file_names_test)}, name: {filename}")
 
         # read image using PIL:
-        I = Image.open(os.path.join(data_path,file_names_test[i]))
+        I = Image.open(os.path.join(data_path,filename))
 
         # convert to numpy array:
         I = np.asarray(I)
 
-        preds_test[file_names_test[i]] = detect_red_light_mf(I)
+        preds = detect_red_light_mf(I, filename)
+        preds_test[filename] = preds
+
+        I = I.copy()
+        for box in preds:
+            y0, x0, y1, x1, _ = tuple(box)
+            cutout = I[y0:y1+1, x0:x1+1, :]
+            cutout = np.maximum(cutout, make_outline(cutout.shape[0], cutout.shape[1]))
+            I[y0:y1+1, x0:x1+1, :] = cutout
+        Image.fromarray(I).save(os.path.join(os.path.join(preds_path, 'test'), filename))
+
 
     # save preds (overwrites any previous predictions!)
     with open(os.path.join(preds_path,'preds_test.json'),'w') as f:
